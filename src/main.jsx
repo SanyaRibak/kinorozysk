@@ -2,6 +2,7 @@ import React, { Component, createRef, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import PropTypes from 'prop-types';
 import './style.css';
+import './filters.css';
 
 const API_URL = 'https://api.themoviedb.org/3';
 const API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
@@ -13,10 +14,11 @@ const movieShape = {
   original_title: PropTypes.string.isRequired,
   release_date: PropTypes.string,
   poster_path: PropTypes.string,
+  vote_average: PropTypes.number.isRequired,
 };
 
 function SearchForm({ onSearch, loading }) {
-  const [query, setQuery] = useState('Матрица');
+  const [query, setQuery] = useState('');
   const inputRef = useRef(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
@@ -55,7 +57,7 @@ class MovieCard extends Component {
   buttonRef = createRef();
 
   render() {
-    const { movie: { title, release_date: releaseDate, poster_path: posterPath }, onSelect, selected } = this.props;
+    const { movie: { title, release_date: releaseDate, poster_path: posterPath, vote_average: rating }, onSelect, selected } = this.props;
     const { imageFailed } = this.state;
     return (
       <article className={`movie-card${selected ? ' selected' : ''}`}>
@@ -63,7 +65,7 @@ class MovieCard extends Component {
           <div className="poster-small">
             {posterPath && !imageFailed ? <img src={`${IMAGE_URL}${posterPath}`} alt={`Постер фильма ${title}`} onError={() => this.setState({ imageFailed: true })} /> : <span>Нет постера</span>}
           </div>
-          <div className="card-text"><h3>{title}</h3><p>{releaseDate?.slice(0, 4) || 'Год не указан'}</p></div>
+          <div className="card-text"><h3>{title}</h3><div className="card-meta"><p>{releaseDate?.slice(0, 4) || 'Год не указан'}</p><p className="card-rating">{rating ? rating.toFixed(1) : '—'}</p></div></div>
         </button>
       </article>
     );
@@ -81,6 +83,30 @@ MovieList.propTypes = {
 };
 MovieList.defaultProps = { selectedId: 0 };
 
+function Filters({ yearFrom, yearTo, minRating, sortBy, onYearFrom, onYearTo, onRating, onSort, onReset }) {
+  return (
+    <div className="filters">
+      <label>Год от<input type="number" min="1888" max="2100" value={yearFrom} onChange={({ target }) => onYearFrom(target.value)} placeholder="1900" /></label>
+      <label>Год до<input type="number" min="1888" max="2100" value={yearTo} onChange={({ target }) => onYearTo(target.value)} placeholder="2026" /></label>
+      <label>Рейтинг от<select value={minRating} onChange={({ target }) => onRating(target.value)}><option value="0">Любой</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option></select></label>
+      <label>Сортировка<select value={sortBy} onChange={({ target }) => onSort(target.value)}><option value="rating-desc">Рейтинг: высокий</option><option value="rating-asc">Рейтинг: низкий</option><option value="year-desc">Сначала новые</option><option value="year-asc">Сначала старые</option></select></label>
+      <button type="button" onClick={onReset}>Сбросить</button>
+    </div>
+  );
+}
+
+Filters.propTypes = {
+  yearFrom: PropTypes.string.isRequired,
+  yearTo: PropTypes.string.isRequired,
+  minRating: PropTypes.string.isRequired,
+  sortBy: PropTypes.string.isRequired,
+  onYearFrom: PropTypes.func.isRequired,
+  onYearTo: PropTypes.func.isRequired,
+  onRating: PropTypes.func.isRequired,
+  onSort: PropTypes.func.isRequired,
+  onReset: PropTypes.func.isRequired,
+};
+
 function MovieDetails({ movie, onClose }) {
   const director = movie.credits?.crew?.find((person) => person.job === 'Director')?.name || 'Не указан';
   const actors = movie.credits?.cast?.slice(0, 5).map((person) => person.name).join(', ') || 'Не указаны';
@@ -91,7 +117,6 @@ function MovieDetails({ movie, onClose }) {
       <button className="close" type="button" onClick={onClose}>Закрыть</button>
       <div className="detail-poster">{movie.poster_path ? <img src={`${IMAGE_URL}${movie.poster_path}`} alt={`Постер фильма ${movie.title}`} /> : <span>Нет постера</span>}</div>
       <div className="detail-content">
-        <p className="case-number">ДЕЛО № {movie.id}</p>
         <h2>{movie.title}</h2>
         {movie.original_title !== movie.title && <p className="original">{movie.original_title}</p>}
         <div className="facts">
@@ -119,9 +144,24 @@ function App() {
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(API_KEY ? 'Введите название фильма.' : 'Добавьте ключ TMDB в файл .env.');
+  const [yearFrom, setYearFrom] = useState('');
+  const [yearTo, setYearTo] = useState('');
+  const [minRating, setMinRating] = useState('0');
+  const [sortBy, setSortBy] = useState('rating-desc');
   const detailsRef = useRef(null);
 
-  useEffect(() => { if (API_KEY) search('Матрица'); }, []);
+  const filteredMovies = movies.filter((movie) => {
+    const year = Number(movie.release_date?.slice(0, 4));
+    const afterStart = !yearFrom || (year && year >= Number(yearFrom));
+    const beforeEnd = !yearTo || (year && year <= Number(yearTo));
+    return afterStart && beforeEnd && movie.vote_average >= Number(minRating);
+  }).sort((first, second) => {
+    if (sortBy === 'rating-asc') return first.vote_average - second.vote_average;
+    if (sortBy === 'year-desc') return Number(second.release_date?.slice(0, 4) || 0) - Number(first.release_date?.slice(0, 4) || 0);
+    if (sortBy === 'year-asc') return Number(first.release_date?.slice(0, 4) || 0) - Number(second.release_date?.slice(0, 4) || 0);
+    return second.vote_average - first.vote_average;
+  });
+
   useEffect(() => {
     if (!selected) return undefined;
     const timer = setTimeout(() => detailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
@@ -158,12 +198,12 @@ function App() {
 
   return (
     <>
-      <header className="site-header"><a className="logo" href="/">КИНО<span>РОЗЫСК</span></a><nav aria-label="Основное меню"><a className="active" href="#search">Главная</a><a href="#results">Фильмы</a><a href="#footer">О проекте</a></nav></header>
+      <header className="site-header"><a className="logo" href="/">КИНО<span>РОЗЫСК</span></a><nav aria-label="Основное меню"><a className="active" href="#search">Главная</a><a href="#results">Фильмы</a></nav></header>
       <main>
-        <section className="hero" id="search"><div className="hero-inner"><div className="hero-copy"><h1>Найдём фильм<br />по горячим следам</h1><p>Поиск по русским и оригинальным названиям.</p></div><SearchForm onSearch={search} loading={loading} /></div></section>
-        <section className="catalog" id="results"><div className="results-head"><h2>Результаты поиска</h2><p className="message" role="status">{message}</p></div>{movies.length > 0 && <MovieList movies={movies} onSelect={selectMovie} selectedId={selected?.id} />}{selected && <div ref={detailsRef} id="details"><MovieDetails movie={selected} onClose={() => setSelected(null)} /></div>}</section>
+        <section className="hero" id="search"><div className="hero-inner"><div className="hero-copy"><h1>Найдем даже ваши<br />хоум видео</h1><p>И не только ваши.</p></div><SearchForm onSearch={search} loading={loading} /></div></section>
+        <section className="catalog" id="results"><div className="results-head"><h2>Результаты поиска</h2><p className="message" role="status">{message}</p></div>{movies.length > 0 && <Filters yearFrom={yearFrom} yearTo={yearTo} minRating={minRating} sortBy={sortBy} onYearFrom={setYearFrom} onYearTo={setYearTo} onRating={setMinRating} onSort={setSortBy} onReset={() => { setYearFrom(''); setYearTo(''); setMinRating('0'); setSortBy('rating-desc'); }} />}{filteredMovies.length > 0 && <MovieList movies={filteredMovies} onSelect={selectMovie} selectedId={selected?.id} />}{movies.length > 0 && filteredMovies.length === 0 && <p className="no-filter-results">По выбранным фильтрам фильмов нет.</p>}{selected && <div ref={detailsRef} id="details"><MovieDetails movie={selected} onClose={() => setSelected(null)} /></div>}</section>
       </main>
-      <footer id="footer">Кинорозыск - учебный проект. Данные предоставлены TMDB.</footer>
+      <footer id="footer">Анекдот: Опытный Соломон Маркович учит молодого соседа:<br />— Лева, слушай сюда и запоминай: женщина — это всегда сюрприз, но не всегда-таки подарок!</footer>
     </>
   );
 }
